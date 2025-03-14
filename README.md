@@ -51,35 +51,6 @@ make run-dir DIR=path/to/pcap/directory
 - `--output`: Output file for Mininet topology (default: "mininet_topology.py")
 - `--verbose`: Enable verbose output with analysis details
 
-## Features
-
-### Traffic Analysis
-- Comprehensive MAC, IP, and port-level traffic analysis
-- Protocol identification and classification (TCP, UDP, ICMP, ARP)
-- Connection pattern analysis to identify relationships between hosts
-- Traffic volume and frequency analysis for role determination
-- Service port analysis for server role detection
-
-### Network Structure Inference
-- Automatic subnet detection and classification
-- Gateway and router identification using traffic flow patterns
-- Identification of internal vs. external communication
-- Hierarchical network structure reconstruction
-- Support for both IPv4 and IPv6 traffic analysis
-
-### Topology Generation
-- Mininet topology generation with proper network segmentation
-- Subnet-aware switching infrastructure
-- Preservation of critical network paths and relationships
-- Generation of executable Python script for Mininet simulation
-- Support for recreating complex multi-subnet architectures
-
-### Batch Processing
-- Process individual PCAP files or entire directories
-- Combine multiple captures for comprehensive network analysis
-- Automated handling of PCAP and PCAPNG file formats
-- Verbose logging and analysis reporting
-
 ## How It Works
 
 PCAP-to-P4app uses a multi-stage analysis pipeline to convert raw packet captures into meaningful network topologies:
@@ -116,28 +87,6 @@ For more complex scenarios:
 # (useful for long-term or multi-point captures)
 ./build/pcap-to-p4app --dir captures/corporate_network/ --output corp_topology.py
 ```
-
-## Development
-
-### Building and Testing
-
-Use the provided Makefile for common development tasks:
-
-```
-make        # Build with linting
-make build  # Just build
-make test   # Run tests
-make fmt    # Format code
-make lint   # Run linters
-make clean  # Clean build artifacts
-```
-
-### Extending the Tool
-
-The modular design allows for easy extension:
-- Add new protocol handlers in the packet parsing phase
-- Implement additional heuristics in the role classification system
-- Create custom topology templates for different simulation environments
 
 ## License
 
