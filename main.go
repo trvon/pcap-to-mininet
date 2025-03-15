@@ -29,19 +29,24 @@ type Traffic struct {
     Timestamp    time.Time
     PacketSize   int
     FlowDuration time.Duration
+    IsDNS        bool
+    DNSQuery     string
 }
 
 // NetworkNode represents a node in the network with additional properties
 type NetworkNode struct {
-    IP           string
-    MAC          string
-    Subnet       string
-    IsLocal      bool    // Whether this node is part of the local network
-    Role         string  // "client", "server", "switch", "router", "gateway"
-    Confidence   float64 // Fuzzy confidence score
-    Connections  int     // Number of unique connections
-    TotalTraffic int64   // Total bytes transferred
-    Services     map[uint16]int // Common ports used (for server identification)
+    IP                string
+    MAC               string
+    Subnet            string
+    IsLocal           bool    // Whether this node is part of the local network
+    Role              string  // "client", "server", "switch", "router", "gateway", "dns-server"
+    Confidence        float64 // Fuzzy confidence score
+    Connections       int     // Number of unique connections
+    TotalTraffic      int64   // Total bytes transferred
+    Services          map[uint16]int // Common ports used (for server identification)
+    IsDNSServer       bool    // Whether this node acts as a DNS server
+    DNSQueryCount     int     // Number of DNS queries handled
+    DNSResponseCount  int     // Number of DNS responses sent
 }
 
 // NetworkTopology represents the inferred network topology
@@ -219,6 +224,19 @@ func parsePCAP(filename string) ([]Traffic, error) {
             t.Protocol = "UDP"
             t.SrcPort = uint16(udp.SrcPort)
             t.DstPort = uint16(udp.DstPort)
+            
+            // Check for DNS (typically UDP port 53)
+            if t.DstPort == 53 || t.SrcPort == 53 {
+                if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
+                    dns, _ := dnsLayer.(*layers.DNS)
+                    t.IsDNS = true
+                    
+                    // Extract query information if available
+                    if len(dns.Questions) > 0 {
+                        t.DNSQuery = string(dns.Questions[0].Name)
+                    }
+                }
+            }
         } else if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
             t.Protocol = "ICMP"
         } else if arpLayer := packet.Layer(layers.LayerTypeARP); arpLayer != nil {
@@ -364,12 +382,15 @@ func inferTopology(trafficData []Traffic) NetworkTopology {
             }
             
             topology.Nodes[t.SrcIP] = &NetworkNode{
-                IP:         t.SrcIP,
-                MAC:        ipToMAC[t.SrcIP],
-                Subnet:     subnet,
-                IsLocal:    isLocal,
-                Confidence: 0.0,
-                Services:   make(map[uint16]int),
+                IP:               t.SrcIP,
+                MAC:              ipToMAC[t.SrcIP],
+                Subnet:           subnet,
+                IsLocal:          isLocal,
+                Confidence:       0.0,
+                Services:         make(map[uint16]int),
+                IsDNSServer:      false,
+                DNSQueryCount:    0,
+                DNSResponseCount: 0,
             }
         }
         
@@ -402,12 +423,15 @@ func inferTopology(trafficData []Traffic) NetworkTopology {
             }
             
             topology.Nodes[t.DstIP] = &NetworkNode{
-                IP:         t.DstIP,
-                MAC:        ipToMAC[t.DstIP],
-                Subnet:     subnet,
-                IsLocal:    isLocal,
-                Confidence: 0.0,
-                Services:   make(map[uint16]int),
+                IP:               t.DstIP,
+                MAC:              ipToMAC[t.DstIP],
+                Subnet:           subnet,
+                IsLocal:          isLocal,
+                Confidence:       0.0,
+                Services:         make(map[uint16]int),
+                IsDNSServer:      false,
+                DNSQueryCount:    0,
+                DNSResponseCount: 0,
             }
         }
 
@@ -435,6 +459,21 @@ func inferTopology(trafficData []Traffic) NetworkTopology {
         if t.DstPort > 0 {
             dstNode := topology.Nodes[t.DstIP]
             dstNode.Services[t.DstPort]++
+            
+            // Track DNS specific information
+            if t.IsDNS {
+                // If it's a DNS query (client to server)
+                if t.DstPort == 53 {
+                    dstNode.IsDNSServer = true
+                    dstNode.DNSQueryCount++
+                }
+                // If it's a DNS response (server to client)
+                if t.SrcPort == 53 {
+                    srcNode := topology.Nodes[t.SrcIP]
+                    srcNode.IsDNSServer = true
+                    srcNode.DNSResponseCount++
+                }
+            }
         }
     }
 
@@ -494,19 +533,24 @@ func applyFuzzyLogic(topology NetworkTopology) NetworkTopology {
         trafficScore := fuzzyTrafficScore(node.TotalTraffic)
         portPatternScore := fuzzyPortPatternScore(topology.Edges[ip])
         serviceScore := fuzzyServiceScore(node.Services)
+        dnsScore := fuzzyDNSScore(node)
 
         // Check for gateway patterns
         isGateway := detectGateway(ip, node, topology)
         
         // Combine scores using fuzzy rules
-        serverScore := (connectionScore*0.3 + trafficScore*0.3 + portPatternScore*0.2 + serviceScore*0.2)
-        clientScore := (1 - connectionScore)*0.4 + (1 - trafficScore)*0.3 + (1 - serviceScore)*0.3
-        routerScore := connectionScore*0.6 + (1 - serviceScore)*0.4
+        serverScore := (connectionScore*0.25 + trafficScore*0.25 + portPatternScore*0.2 + serviceScore*0.2 + dnsScore*0.1)
+        clientScore := (1 - connectionScore)*0.35 + (1 - trafficScore)*0.25 + (1 - serviceScore)*0.25 + (1 - dnsScore)*0.15
+        routerScore := connectionScore*0.6 + (1 - serviceScore)*0.3 + (1 - dnsScore)*0.1
+        dnsServerScore := dnsScore*0.6 + serviceScore*0.2 + connectionScore*0.2
 
         // Determine role based on highest score and thresholds
         if isGateway {
             node.Role = "gateway"
             node.Confidence = 0.9
+        } else if node.IsDNSServer && dnsServerScore > 0.7 {
+            node.Role = "dns-server"
+            node.Confidence = dnsServerScore
         } else if serverScore > clientScore && serverScore > routerScore && serverScore > 0.6 {
             node.Role = "server"
             node.Confidence = serverScore
@@ -657,6 +701,27 @@ func fuzzyTrafficScore(traffic int64) float64 {
     return 1.0
 }
 
+// fuzzyDNSScore evaluates how likely a node is a DNS server based on its DNS traffic
+func fuzzyDNSScore(node *NetworkNode) float64 {
+    if !node.IsDNSServer {
+        return 0.0
+    }
+    
+    // Calculate score based on DNS query and response counts
+    totalDNS := node.DNSQueryCount + node.DNSResponseCount
+    
+    if totalDNS == 0 {
+        return 0.0
+    } else if totalDNS < 5 {
+        return 0.3
+    } else if totalDNS < 20 {
+        return 0.6
+    } else if totalDNS < 100 {
+        return 0.8
+    }
+    return 1.0
+}
+
 func fuzzyPortPatternScore(edges map[string]float64) float64 {
     if len(edges) == 0 {
         return 0.0
@@ -686,7 +751,7 @@ func fuzzyPortPatternScore(edges map[string]float64) float64 {
 // Print a summary of the inferred topology
 func printTopologySummary(topology NetworkTopology) {
     // Count node types
-    var clients, servers, routers, switches, gateways int
+    var clients, servers, routers, switches, gateways, dnsServers int
     for _, node := range topology.Nodes {
         switch node.Role {
         case "client":
@@ -699,12 +764,15 @@ func printTopologySummary(topology NetworkTopology) {
             switches++
         case "gateway":
             gateways++
+        case "dns-server":
+            dnsServers++
         }
     }
     
     log.Printf("Network nodes by role:")
     log.Printf("  Clients: %d", clients)
     log.Printf("  Servers: %d", servers)
+    log.Printf("  DNS Servers: %d", dnsServers)
     log.Printf("  Routers: %d", routers)
     log.Printf("  Switches: %d", switches)
     log.Printf("  Gateways: %d", gateways)
@@ -768,6 +836,16 @@ def createTopology():
         router = net.addHost('r{{formatIP $ip}}', ip='{{$ip}}')
         # Connect router to core switch
         net.addLink(router, core_switch)
+    {{else if eq $node.Role "dns-server"}}
+    # Add DNS server with custom configuration
+    hosts['{{$ip}}'] = net.addHost('dns{{formatIP $ip}}', ip='{{$ip}}', mac='{{formatMAC $node.MAC}}')
+    {{if $node.Subnet}}
+    # Connect to subnet switch
+    net.addLink(hosts['{{$ip}}'], switches['{{$node.Subnet}}'])
+    {{else}}
+    # No subnet, connect to core
+    net.addLink(hosts['{{$ip}}'], core_switch)
+    {{end}}
     {{else}}
     hosts['{{$ip}}'] = net.addHost('h{{formatIP $ip}}', ip='{{$ip}}', mac='{{formatMAC $node.MAC}}')
     {{if $node.Subnet}}
@@ -785,6 +863,21 @@ def createTopology():
     {{if hasGateway .Nodes}}
     internet = net.addHost('internet', ip='8.8.8.8')
     net.addLink(internet, core_switch)
+    {{end}}
+    
+    # Add external DNS server if needed
+    {{if hasDNSServer .Nodes}}
+    # Configure DNS servers to respond to queries
+    info('*** Configuring DNS servers\n')
+    {{range $ip, $node := .Nodes}}
+    {{if and $node.IsLocal (eq $node.Role "dns-server")}}
+    info('*** Setting up DNS server {{$ip}}\n')
+    # Configure the hosts to use this DNS server
+    for host in hosts.values():
+        if host.IP() != '{{$ip}}':
+            host.cmd('echo "nameserver {{$ip}}" > /etc/resolv.conf')
+    {{end}}
+    {{end}}
     {{end}}
     
     return net
@@ -854,6 +947,14 @@ if __name__ == '__main__':
         "hasGateway": func(nodes map[string]*NetworkNode) bool {
             for _, node := range nodes {
                 if node.Role == "gateway" {
+                    return true
+                }
+            }
+            return false
+        },
+        "hasDNSServer": func(nodes map[string]*NetworkNode) bool {
+            for _, node := range nodes {
+                if node.Role == "dns-server" {
                     return true
                 }
             }
