@@ -1,6 +1,6 @@
-# PCAP-to-P4app
+# pcap-to-mininet
 
-A tool for converting PCAP network captures to P4/Mininet network simulations for network experimentation and research.
+An experimental tool for converting PCAP network captures to mininet network topologies for network experimentation and research.
 
 ## Description
 
