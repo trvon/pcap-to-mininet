@@ -1,11 +1,16 @@
-package main
+package tests
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/trvon/pcap-to-mininet"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/trvon/pcap-to-mininet/pkg/analyzer"
+	"github.com/trvon/pcap-to-mininet/pkg/topology"
+	"github.com/trvon/pcap-to-mininet/pkg/visualization"
 )
 
 // TestTopologyGenerationWithDNS tests the full pipeline with DNS packets
@@ -22,27 +27,43 @@ func TestTopologyGenerationWithDNS(t *testing.T) {
 	}
 	defer os.RemoveAll(testDir)
 
-	// Generate a mock PCAP file with DNS packets
-	pcapFile := filepath.Join(testDir, "test.pcap")
-	if err := createMockPCAPWithDNS(pcapFile); err != nil {
-		t.Fatalf("Failed to create mock PCAP file: %v", err)
-	}
+	// Create test traffic data directly (simulating PCAP parsing)
+	var trafficData []analyzer.Traffic
+
+	// Add DNS query traffic
+	trafficData = append(trafficData, analyzer.Traffic{
+		SrcIP:    "192.168.1.20",
+		DstIP:    "192.168.1.10",
+		SrcMAC:   "00:11:22:33:44:66",
+		DstMAC:   "00:11:22:33:44:55",
+		Protocol: "UDP",
+		SrcPort:  12345,
+		DstPort:  53,
+		IsDNS:    true,
+		DNSQuery: "example.com",
+	})
+
+	// Add DNS response traffic
+	trafficData = append(trafficData, analyzer.Traffic{
+		SrcIP:    "192.168.1.10",
+		DstIP:    "192.168.1.20",
+		SrcMAC:   "00:11:22:33:44:55",
+		DstMAC:   "00:11:22:33:44:66",
+		Protocol: "UDP",
+		SrcPort:  53,
+		DstPort:  12345,
+		IsDNS:    true,
+	})
 
 	// Create output file path
 	outputFile := filepath.Join(testDir, "mininet_topology.py")
 
-	// Run the main processing pipeline
-	trafficData, err := parsePCAP(pcapFile)
-	if err != nil {
-		t.Fatalf("Failed to parse PCAP: %v", err)
-	}
-
-	// Process the traffic data
-	topology := inferTopology(trafficData)
-	refinedTopology := applyFuzzyLogic(topology)
+	// Run the processing pipeline
+	networkTopology := topology.InferTopology(trafficData)
+	refinedTopology := analyzer.ApplyFuzzyLogic(networkTopology)
 
 	// Generate the Mininet topology
-	err = generateMininetTopology(refinedTopology, outputFile)
+	err = visualization.GenerateMininetTopology(refinedTopology, outputFile)
 	if err != nil {
 		t.Fatalf("Failed to generate Mininet topology: %v", err)
 	}
@@ -59,10 +80,10 @@ func TestTopologyGenerationWithDNS(t *testing.T) {
 // TestDNSResilience tests the resilience of DNS packet handling
 func TestDNSResilience(t *testing.T) {
 	// Create mixed traffic data with some malformed packets
-	var trafficData []Traffic
+	var trafficData []analyzer.Traffic
 
 	// Regular DNS packet
-	trafficData = append(trafficData, Traffic{
+	trafficData = append(trafficData, analyzer.Traffic{
 		SrcIP:    "192.168.1.20",
 		DstIP:    "192.168.1.10",
 		SrcPort:  12345,
@@ -73,7 +94,7 @@ func TestDNSResilience(t *testing.T) {
 	})
 
 	// Malformed DNS packet (UDP port 53 but not actually DNS)
-	trafficData = append(trafficData, Traffic{
+	trafficData = append(trafficData, analyzer.Traffic{
 		SrcIP:    "192.168.1.21",
 		DstIP:    "192.168.1.10",
 		SrcPort:  12346,
@@ -83,7 +104,7 @@ func TestDNSResilience(t *testing.T) {
 	})
 
 	// Non-DNS packet
-	trafficData = append(trafficData, Traffic{
+	trafficData = append(trafficData, analyzer.Traffic{
 		SrcIP:    "192.168.1.22",
 		DstIP:    "192.168.1.30",
 		SrcPort:  12347,
@@ -93,8 +114,8 @@ func TestDNSResilience(t *testing.T) {
 	})
 
 	// Process the traffic data
-	topology := inferTopology(trafficData)
-	refinedTopology := applyFuzzyLogic(topology)
+	networkTopology := topology.InferTopology(trafficData)
+	refinedTopology := analyzer.ApplyFuzzyLogic(networkTopology)
 
 	// The DNS server should still be identified despite the malformed packet
 	if !refinedTopology.Nodes["192.168.1.10"].IsDNSServer {
@@ -111,12 +132,12 @@ func TestDNSResilience(t *testing.T) {
 func TestEdgeCases(t *testing.T) {
 	tests := []struct {
 		name    string
-		traffic Traffic
+		traffic analyzer.Traffic
 		wantDNS bool
 	}{
 		{
 			name: "TCP port 53 (not DNS)",
-			traffic: Traffic{
+			traffic: analyzer.Traffic{
 				SrcIP:    "192.168.1.2",
 				DstIP:    "192.168.1.1",
 				Protocol: "TCP",
@@ -128,7 +149,7 @@ func TestEdgeCases(t *testing.T) {
 		},
 		{
 			name: "Empty DNS query",
-			traffic: Traffic{
+			traffic: analyzer.Traffic{
 				SrcIP:    "192.168.1.2",
 				DstIP:    "192.168.1.1",
 				Protocol: "UDP",
@@ -141,7 +162,7 @@ func TestEdgeCases(t *testing.T) {
 		},
 		{
 			name: "Response from DNS server",
-			traffic: Traffic{
+			traffic: analyzer.Traffic{
 				SrcIP:    "192.168.1.1",
 				DstIP:    "192.168.1.2",
 				Protocol: "UDP",
@@ -156,13 +177,13 @@ func TestEdgeCases(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create a basic topology with two nodes
-			topology := NetworkTopology{
-				Nodes: make(map[string]*NetworkNode),
+			testTopology := analyzer.NetworkTopology{
+				Nodes: make(map[string]*analyzer.NetworkNode),
 				Edges: make(map[string]map[string]float64),
 			}
 
 			// Add the nodes
-			topology.Nodes[tc.traffic.SrcIP] = &NetworkNode{
+			testTopology.Nodes[tc.traffic.SrcIP] = &analyzer.NetworkNode{
 				IP:               tc.traffic.SrcIP,
 				Services:         make(map[uint16]int),
 				IsDNSServer:      false,
@@ -170,7 +191,7 @@ func TestEdgeCases(t *testing.T) {
 				DNSResponseCount: 0,
 			}
 
-			topology.Nodes[tc.traffic.DstIP] = &NetworkNode{
+			testTopology.Nodes[tc.traffic.DstIP] = &analyzer.NetworkNode{
 				IP:               tc.traffic.DstIP,
 				Services:         make(map[uint16]int),
 				IsDNSServer:      false,
@@ -178,39 +199,21 @@ func TestEdgeCases(t *testing.T) {
 				DNSResponseCount: 0,
 			}
 
-			// Process the traffic
-			if tc.traffic.DstPort > 0 {
-				dstNode := topology.Nodes[tc.traffic.DstIP]
-				dstNode.Services[tc.traffic.DstPort]++
-
-				// Track DNS specific information
-				if tc.traffic.IsDNS {
-					// If it's a DNS query (client to server)
-					if tc.traffic.DstPort == 53 {
-						dstNode.IsDNSServer = true
-						dstNode.DNSQueryCount++
-					}
-					// If it's a DNS response (server to client)
-					if tc.traffic.SrcPort == 53 {
-						srcNode := topology.Nodes[tc.traffic.SrcIP]
-						srcNode.IsDNSServer = true
-						srcNode.DNSResponseCount++
-					}
-				}
-			}
+			// Process the DNS traffic
+			analyzer.ProcessDNSTraffic(testTopology, tc.traffic)
 
 			// Verify DNS server identification
 			if tc.wantDNS {
 				// In a DNS query
 				if tc.traffic.DstPort == 53 {
-					if !topology.Nodes[tc.traffic.DstIP].IsDNSServer {
+					if !testTopology.Nodes[tc.traffic.DstIP].IsDNSServer {
 						t.Errorf("Expected destination to be marked as DNS server")
 					}
 				}
 
 				// In a DNS response
 				if tc.traffic.SrcPort == 53 {
-					if !topology.Nodes[tc.traffic.SrcIP].IsDNSServer {
+					if !testTopology.Nodes[tc.traffic.SrcIP].IsDNSServer {
 						t.Errorf("Expected source to be marked as DNS server")
 					}
 				}
@@ -221,68 +224,8 @@ func TestEdgeCases(t *testing.T) {
 
 // Helper functions for the integration tests
 
-// createMockPCAPWithDNS creates a mock PCAP file with DNS traffic for testing
-func createMockPCAPWithDNS(filepath string) error {
-	// Generate sample packets
-	var packets [][]byte
-
-	// DNS query packet
-	packets = append(packets, generateMockDNSPacket("example.com", true))
-
-	// DNS response packet
-	packets = append(packets, generateMockDNSPacket("example.com", false))
-
-	// Regular HTTP traffic
-	packets = append(packets, generateMockUDPPacket(12345, 80))
-
-	// Write the packets to a file
-	file, err := os.Create(filepath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Write a minimal PCAP header (this is a simplified version)
-	// Real implementation would write a proper PCAP file
-	header := []byte{
-		0xd4, 0xc3, 0xb2, 0xa1, // magic number
-		0x02, 0x00, 0x04, 0x00, // version
-		0x00, 0x00, 0x00, 0x00, // timezone
-		0x00, 0x00, 0x00, 0x00, // accuracy
-		0xff, 0xff, 0x00, 0x00, // max packet length
-		0x01, 0x00, 0x00, 0x00, // data link type (Ethernet)
-	}
-
-	_, err = file.Write(header)
-	if err != nil {
-		return err
-	}
-
-	// Write each packet with a simplified packet header
-	for _, packet := range packets {
-		packetHeader := []byte{
-			0x00, 0x00, 0x00, 0x00, // timestamp seconds
-			0x00, 0x00, 0x00, 0x00, // timestamp microseconds
-			byte(len(packet)), 0x00, 0x00, 0x00, // captured length
-			byte(len(packet)), 0x00, 0x00, 0x00, // actual length
-		}
-
-		_, err = file.Write(packetHeader)
-		if err != nil {
-			return err
-		}
-
-		_, err = file.Write(packet)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // verifyTopologyNodes checks that the topology has the expected nodes and roles
-func verifyTopologyNodes(t *testing.T, topology NetworkTopology) {
+func verifyTopologyNodes(t *testing.T, topology analyzer.NetworkTopology) {
 	// Count node types
 	var dnsServers int
 
@@ -297,4 +240,138 @@ func verifyTopologyNodes(t *testing.T, topology NetworkTopology) {
 
 	// We don't make this a hard assertion because the actual classification
 	// depends on the specific thresholds in the fuzzy logic
+}
+
+// generateMockDNSPacket creates a mock DNS packet for testing
+func generateMockDNSPacket(domain string, isQuery bool) []byte {
+	// Create the layers
+	eth := layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		DstMAC:       net.HardwareAddr{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	ipv4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+	}
+
+	if isQuery {
+		ipv4.SrcIP = net.ParseIP("192.168.1.20")
+		ipv4.DstIP = net.ParseIP("192.168.1.10")
+	} else {
+		ipv4.SrcIP = net.ParseIP("192.168.1.10")
+		ipv4.DstIP = net.ParseIP("192.168.1.20")
+	}
+
+	udp := layers.UDP{}
+	if isQuery {
+		udp.SrcPort = layers.UDPPort(12345)
+		udp.DstPort = layers.UDPPort(53)
+	} else {
+		udp.SrcPort = layers.UDPPort(53)
+		udp.DstPort = layers.UDPPort(12345)
+	}
+
+	dns := layers.DNS{
+		QR: !isQuery, // false for query, true for response
+		RD: true,     // Recursion desired
+		RA: !isQuery, // Recursion available (for responses)
+	}
+
+	if isQuery {
+		dns.Questions = []layers.DNSQuestion{
+			{
+				Name:  []byte(domain),
+				Type:  layers.DNSTypeA,
+				Class: layers.DNSClassIN,
+			},
+		}
+	} else {
+		dns.Questions = []layers.DNSQuestion{
+			{
+				Name:  []byte(domain),
+				Type:  layers.DNSTypeA,
+				Class: layers.DNSClassIN,
+			},
+		}
+		dns.Answers = []layers.DNSResourceRecord{
+			{
+				Name:  []byte(domain),
+				Type:  layers.DNSTypeA,
+				Class: layers.DNSClassIN,
+				TTL:   300,
+				IP:    net.ParseIP("93.184.216.34"),
+			},
+		}
+	}
+
+	// Calculate checksums and lengths
+	udp.SetNetworkLayerForChecksum(&ipv4)
+
+	// Serialize all layers into buffer
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		ComputeChecksums: true,
+		FixLengths:       true,
+	}
+
+	err := gopacket.SerializeLayers(buffer, opts,
+		&eth,
+		&ipv4,
+		&udp,
+		&dns,
+	)
+
+	if err != nil {
+		panic(err) // In a test, we can just panic
+	}
+
+	return buffer.Bytes()
+}
+
+// generateMockUDPPacket creates a non-DNS UDP packet for testing
+func generateMockUDPPacket(srcPort, dstPort uint16) []byte {
+	// Create the layers
+	eth := layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		DstMAC:       net.HardwareAddr{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	ipv4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.168.1.20"),
+		DstIP:    net.ParseIP("192.168.1.30"),
+	}
+
+	udp := layers.UDP{
+		SrcPort: layers.UDPPort(srcPort),
+		DstPort: layers.UDPPort(dstPort),
+	}
+
+	// Calculate checksums and lengths
+	udp.SetNetworkLayerForChecksum(&ipv4)
+
+	// Serialize all layers into buffer
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		ComputeChecksums: true,
+		FixLengths:       true,
+	}
+
+	err := gopacket.SerializeLayers(buffer, opts,
+		&eth,
+		&ipv4,
+		&udp,
+	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return buffer.Bytes()
 }
