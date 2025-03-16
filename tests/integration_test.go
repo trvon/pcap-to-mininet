@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/trvon/pcap-to-mininet"
 )
 
 // TestTopologyGenerationWithDNS tests the full pipeline with DNS packets
@@ -61,33 +63,33 @@ func TestDNSResilience(t *testing.T) {
 
 	// Regular DNS packet
 	trafficData = append(trafficData, Traffic{
-		SrcIP:   "192.168.1.20",
-		DstIP:   "192.168.1.10",
-		SrcPort: 12345,
-		DstPort: 53,
+		SrcIP:    "192.168.1.20",
+		DstIP:    "192.168.1.10",
+		SrcPort:  12345,
+		DstPort:  53,
 		Protocol: "UDP",
-		IsDNS:   true,
+		IsDNS:    true,
 		DNSQuery: "example.com",
 	})
 
 	// Malformed DNS packet (UDP port 53 but not actually DNS)
 	trafficData = append(trafficData, Traffic{
-		SrcIP:   "192.168.1.21",
-		DstIP:   "192.168.1.10",
-		SrcPort: 12346,
-		DstPort: 53,
+		SrcIP:    "192.168.1.21",
+		DstIP:    "192.168.1.10",
+		SrcPort:  12346,
+		DstPort:  53,
 		Protocol: "UDP",
-		IsDNS:   false, // Not marked as DNS despite port 53
+		IsDNS:    false, // Not marked as DNS despite port 53
 	})
 
 	// Non-DNS packet
 	trafficData = append(trafficData, Traffic{
-		SrcIP:   "192.168.1.22",
-		DstIP:   "192.168.1.30",
-		SrcPort: 12347,
-		DstPort: 80,
+		SrcIP:    "192.168.1.22",
+		DstIP:    "192.168.1.30",
+		SrcPort:  12347,
+		DstPort:  80,
 		Protocol: "TCP",
-		IsDNS:   false,
+		IsDNS:    false,
 	})
 
 	// Process the traffic data
@@ -101,16 +103,16 @@ func TestDNSResilience(t *testing.T) {
 
 	// And the DNS server role should be properly assigned
 	// (this test is more lenient since the classification depends on thresholds)
-	t.Logf("DNS server role: %s (expected 'dns-server' or 'server')", 
+	t.Logf("DNS server role: %s (expected 'dns-server' or 'server')",
 		refinedTopology.Nodes["192.168.1.10"].Role)
 }
 
 // TestEdgeCases tests edge cases in DNS packet handling
 func TestEdgeCases(t *testing.T) {
 	tests := []struct {
-		name     string
-		traffic  Traffic
-		wantDNS  bool
+		name    string
+		traffic Traffic
+		wantDNS bool
 	}{
 		{
 			name: "TCP port 53 (not DNS)",
@@ -158,7 +160,7 @@ func TestEdgeCases(t *testing.T) {
 				Nodes: make(map[string]*NetworkNode),
 				Edges: make(map[string]map[string]float64),
 			}
-			
+
 			// Add the nodes
 			topology.Nodes[tc.traffic.SrcIP] = &NetworkNode{
 				IP:               tc.traffic.SrcIP,
@@ -167,7 +169,7 @@ func TestEdgeCases(t *testing.T) {
 				DNSQueryCount:    0,
 				DNSResponseCount: 0,
 			}
-			
+
 			topology.Nodes[tc.traffic.DstIP] = &NetworkNode{
 				IP:               tc.traffic.DstIP,
 				Services:         make(map[uint16]int),
@@ -175,12 +177,12 @@ func TestEdgeCases(t *testing.T) {
 				DNSQueryCount:    0,
 				DNSResponseCount: 0,
 			}
-			
+
 			// Process the traffic
 			if tc.traffic.DstPort > 0 {
 				dstNode := topology.Nodes[tc.traffic.DstIP]
 				dstNode.Services[tc.traffic.DstPort]++
-				
+
 				// Track DNS specific information
 				if tc.traffic.IsDNS {
 					// If it's a DNS query (client to server)
@@ -196,7 +198,7 @@ func TestEdgeCases(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Verify DNS server identification
 			if tc.wantDNS {
 				// In a DNS query
@@ -205,7 +207,7 @@ func TestEdgeCases(t *testing.T) {
 						t.Errorf("Expected destination to be marked as DNS server")
 					}
 				}
-				
+
 				// In a DNS response
 				if tc.traffic.SrcPort == 53 {
 					if !topology.Nodes[tc.traffic.SrcIP].IsDNSServer {
@@ -223,23 +225,23 @@ func TestEdgeCases(t *testing.T) {
 func createMockPCAPWithDNS(filepath string) error {
 	// Generate sample packets
 	var packets [][]byte
-	
+
 	// DNS query packet
 	packets = append(packets, generateMockDNSPacket("example.com", true))
-	
+
 	// DNS response packet
 	packets = append(packets, generateMockDNSPacket("example.com", false))
-	
+
 	// Regular HTTP traffic
 	packets = append(packets, generateMockUDPPacket(12345, 80))
-	
+
 	// Write the packets to a file
 	file, err := os.Create(filepath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	
+
 	// Write a minimal PCAP header (this is a simplified version)
 	// Real implementation would write a proper PCAP file
 	header := []byte{
@@ -250,12 +252,12 @@ func createMockPCAPWithDNS(filepath string) error {
 		0xff, 0xff, 0x00, 0x00, // max packet length
 		0x01, 0x00, 0x00, 0x00, // data link type (Ethernet)
 	}
-	
+
 	_, err = file.Write(header)
 	if err != nil {
 		return err
 	}
-	
+
 	// Write each packet with a simplified packet header
 	for _, packet := range packets {
 		packetHeader := []byte{
@@ -264,18 +266,18 @@ func createMockPCAPWithDNS(filepath string) error {
 			byte(len(packet)), 0x00, 0x00, 0x00, // captured length
 			byte(len(packet)), 0x00, 0x00, 0x00, // actual length
 		}
-		
+
 		_, err = file.Write(packetHeader)
 		if err != nil {
 			return err
 		}
-		
+
 		_, err = file.Write(packet)
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -283,16 +285,16 @@ func createMockPCAPWithDNS(filepath string) error {
 func verifyTopologyNodes(t *testing.T, topology NetworkTopology) {
 	// Count node types
 	var dnsServers int
-	
+
 	for _, node := range topology.Nodes {
 		if node.Role == "dns-server" {
 			dnsServers++
 		}
 	}
-	
+
 	// In our mock topology, we should have at least one DNS server
 	t.Logf("DNS servers found: %d", dnsServers)
-	
+
 	// We don't make this a hard assertion because the actual classification
 	// depends on the specific thresholds in the fuzzy logic
 }

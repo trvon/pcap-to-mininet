@@ -1,4 +1,4 @@
-module github.com/trvon/pcap-to-p4app
+module github.com/trvon/pcap-to-mininet
 
 go 1.23
 

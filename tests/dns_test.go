@@ -3,7 +3,7 @@ package main
 import (
 	"net"
 	"testing"
-
+	"github.com/trvon/pcap-to-mininet"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -12,23 +12,23 @@ import (
 func TestDNSPacketDetection(t *testing.T) {
 	// Create a mock DNS packet
 	buffer := generateMockDNSPacket("example.com", true)
-	
+
 	// Parse the packet
 	packet := gopacket.NewPacket(buffer, layers.LayerTypeEthernet, gopacket.Default)
-	
+
 	// Process the packet as the main code would
 	traffic := processPacketForTest(packet)
-	
+
 	// Verify DNS packet identification
 	if !traffic.IsDNS {
 		t.Errorf("Failed to identify DNS packet: IsDNS is false")
 	}
-	
+
 	// Verify DNS query extraction
 	if traffic.DNSQuery != "example.com" {
 		t.Errorf("Failed to extract DNS query name: got %s, want example.com", traffic.DNSQuery)
 	}
-	
+
 	// Verify port identification
 	if traffic.DstPort != 53 {
 		t.Errorf("Incorrect destination port: got %d, want 53", traffic.DstPort)
@@ -39,18 +39,18 @@ func TestDNSPacketDetection(t *testing.T) {
 func TestNonDNSUDPPacket(t *testing.T) {
 	// Create a mock UDP packet (not DNS)
 	buffer := generateMockUDPPacket(8080, 12345)
-	
+
 	// Parse the packet
 	packet := gopacket.NewPacket(buffer, layers.LayerTypeEthernet, gopacket.Default)
-	
+
 	// Process the packet
 	traffic := processPacketForTest(packet)
-	
+
 	// Verify it's not identified as DNS
 	if traffic.IsDNS {
 		t.Errorf("Non-DNS UDP packet incorrectly identified as DNS")
 	}
-	
+
 	// Check ports for verification
 	if traffic.SrcPort != 8080 || traffic.DstPort != 12345 {
 		t.Errorf("Incorrect port information: src=%d, dst=%d", traffic.SrcPort, traffic.DstPort)
@@ -64,7 +64,7 @@ func TestDNSServerDetection(t *testing.T) {
 		Nodes: make(map[string]*NetworkNode),
 		Edges: make(map[string]map[string]float64),
 	}
-	
+
 	// Add a DNS server node
 	dnsServer := &NetworkNode{
 		IP:               "192.168.1.10",
@@ -77,41 +77,41 @@ func TestDNSServerDetection(t *testing.T) {
 		Services:         map[uint16]int{53: 95},
 	}
 	topology.Nodes["192.168.1.10"] = dnsServer
-	
+
 	// Add a regular server node
 	regularServer := &NetworkNode{
-		IP:           "192.168.1.20",
-		MAC:          "00:11:22:33:44:66",
-		IsLocal:      true,
-		Subnet:       "192.168.1.0/24",
-		Services:     map[uint16]int{80: 100},
+		IP:       "192.168.1.20",
+		MAC:      "00:11:22:33:44:66",
+		IsLocal:  true,
+		Subnet:   "192.168.1.0/24",
+		Services: map[uint16]int{80: 100},
 	}
 	topology.Nodes["192.168.1.20"] = regularServer
-	
+
 	// Add a client node
 	clientNode := &NetworkNode{
-		IP:           "192.168.1.30",
-		MAC:          "00:11:22:33:44:77",
-		IsLocal:      true,
-		Subnet:       "192.168.1.0/24",
-		Connections:  3,
+		IP:          "192.168.1.30",
+		MAC:         "00:11:22:33:44:77",
+		IsLocal:     true,
+		Subnet:      "192.168.1.0/24",
+		Connections: 3,
 	}
 	topology.Nodes["192.168.1.30"] = clientNode
-	
+
 	// Apply fuzzy logic
 	refinedTopology := applyFuzzyLogic(topology)
-	
+
 	// Check DNS server role assignment
 	if refinedTopology.Nodes["192.168.1.10"].Role != "dns-server" {
 		t.Errorf("Failed to identify DNS server: got role %s", refinedTopology.Nodes["192.168.1.10"].Role)
 	}
-	
+
 	// Check regular server
-	if refinedTopology.Nodes["192.168.1.20"].Role != "server" && 
-	   refinedTopology.Nodes["192.168.1.20"].Role != "client" {
+	if refinedTopology.Nodes["192.168.1.20"].Role != "server" &&
+		refinedTopology.Nodes["192.168.1.20"].Role != "client" {
 		t.Errorf("Incorrectly identified regular server: got role %s", refinedTopology.Nodes["192.168.1.20"].Role)
 	}
-	
+
 	// Check that client is not misidentified
 	if refinedTopology.Nodes["192.168.1.30"].Role == "dns-server" {
 		t.Errorf("Client incorrectly identified as DNS server: got role %s", refinedTopology.Nodes["192.168.1.30"].Role)
@@ -129,7 +129,7 @@ func TestDNSScoreFunction(t *testing.T) {
 	if score := fuzzyDNSScore(nonDNSNode); score != 0.0 {
 		t.Errorf("Non-DNS server should have score 0, got %f", score)
 	}
-	
+
 	// Test case: DNS server with no traffic
 	emptyDNSNode := &NetworkNode{
 		IsDNSServer:      true,
@@ -139,7 +139,7 @@ func TestDNSScoreFunction(t *testing.T) {
 	if score := fuzzyDNSScore(emptyDNSNode); score != 0.0 {
 		t.Errorf("DNS server with no traffic should have score 0, got %f", score)
 	}
-	
+
 	// Test case: DNS server with low traffic
 	lowDNSNode := &NetworkNode{
 		IsDNSServer:      true,
@@ -149,7 +149,7 @@ func TestDNSScoreFunction(t *testing.T) {
 	if score := fuzzyDNSScore(lowDNSNode); score != 0.3 {
 		t.Errorf("DNS server with low traffic should have score 0.3, got %f", score)
 	}
-	
+
 	// Test case: DNS server with medium traffic
 	mediumDNSNode := &NetworkNode{
 		IsDNSServer:      true,
@@ -159,7 +159,7 @@ func TestDNSScoreFunction(t *testing.T) {
 	if score := fuzzyDNSScore(mediumDNSNode); score != 0.6 {
 		t.Errorf("DNS server with medium traffic should have score 0.6, got %f", score)
 	}
-	
+
 	// Test case: DNS server with high traffic
 	highDNSNode := &NetworkNode{
 		IsDNSServer:      true,
@@ -169,7 +169,7 @@ func TestDNSScoreFunction(t *testing.T) {
 	if score := fuzzyDNSScore(highDNSNode); score != 0.8 {
 		t.Errorf("DNS server with high traffic should have score 0.8, got %f", score)
 	}
-	
+
 	// Test case: DNS server with very high traffic
 	veryHighDNSNode := &NetworkNode{
 		IsDNSServer:      true,
@@ -188,7 +188,7 @@ func TestDNSTrafficTracking(t *testing.T) {
 		Nodes: make(map[string]*NetworkNode),
 		Edges: make(map[string]map[string]float64),
 	}
-	
+
 	// Add DNS server and client nodes
 	topology.Nodes["192.168.1.10"] = &NetworkNode{
 		IP:               "192.168.1.10",
@@ -197,7 +197,7 @@ func TestDNSTrafficTracking(t *testing.T) {
 		DNSQueryCount:    0,
 		DNSResponseCount: 0,
 	}
-	
+
 	topology.Nodes["192.168.1.20"] = &NetworkNode{
 		IP:               "192.168.1.20",
 		Services:         make(map[uint16]int),
@@ -205,7 +205,7 @@ func TestDNSTrafficTracking(t *testing.T) {
 		DNSQueryCount:    0,
 		DNSResponseCount: 0,
 	}
-	
+
 	// Create DNS query traffic (client to server)
 	queryTraffic := Traffic{
 		SrcIP:   "192.168.1.20",
@@ -214,7 +214,7 @@ func TestDNSTrafficTracking(t *testing.T) {
 		DstPort: 53,
 		IsDNS:   true,
 	}
-	
+
 	// Create DNS response traffic (server to client)
 	responseTraffic := Traffic{
 		SrcIP:   "192.168.1.10",
@@ -223,25 +223,25 @@ func TestDNSTrafficTracking(t *testing.T) {
 		DstPort: 12345,
 		IsDNS:   true,
 	}
-	
+
 	// Process the traffic for DNS server tracking
 	processDNSTrafficForTest(topology, queryTraffic)
 	processDNSTrafficForTest(topology, responseTraffic)
-	
+
 	// Check if DNS server is properly identified
 	if !topology.Nodes["192.168.1.10"].IsDNSServer {
 		t.Errorf("Failed to mark node as DNS server")
 	}
-	
+
 	// Check query count
 	if topology.Nodes["192.168.1.10"].DNSQueryCount != 1 {
-		t.Errorf("DNS query count incorrect: got %d, want 1", 
+		t.Errorf("DNS query count incorrect: got %d, want 1",
 			topology.Nodes["192.168.1.10"].DNSQueryCount)
 	}
-	
+
 	// Check response count
 	if topology.Nodes["192.168.1.10"].DNSResponseCount != 1 {
-		t.Errorf("DNS response count incorrect: got %d, want 1", 
+		t.Errorf("DNS response count incorrect: got %d, want 1",
 			topology.Nodes["192.168.1.10"].DNSResponseCount)
 	}
 }
@@ -256,13 +256,13 @@ func generateMockDNSPacket(domain string, isQuery bool) []byte {
 		DstMAC:       net.HardwareAddr{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
 		EthernetType: layers.EthernetTypeIPv4,
 	}
-	
+
 	ipv4 := layers.IPv4{
 		Version:  4,
 		TTL:      64,
 		Protocol: layers.IPProtocolUDP,
 	}
-	
+
 	if isQuery {
 		ipv4.SrcIP = net.ParseIP("192.168.1.20")
 		ipv4.DstIP = net.ParseIP("192.168.1.10")
@@ -270,7 +270,7 @@ func generateMockDNSPacket(domain string, isQuery bool) []byte {
 		ipv4.SrcIP = net.ParseIP("192.168.1.10")
 		ipv4.DstIP = net.ParseIP("192.168.1.20")
 	}
-	
+
 	udp := layers.UDP{}
 	if isQuery {
 		udp.SrcPort = layers.UDPPort(12345)
@@ -279,13 +279,13 @@ func generateMockDNSPacket(domain string, isQuery bool) []byte {
 		udp.SrcPort = layers.UDPPort(53)
 		udp.DstPort = layers.UDPPort(12345)
 	}
-	
+
 	dns := layers.DNS{
-		QR:      !isQuery, // false for query, true for response
-		RD:      true,     // Recursion desired
-		RA:      !isQuery, // Recursion available (for responses)
+		QR: !isQuery, // false for query, true for response
+		RD: true,     // Recursion desired
+		RA: !isQuery, // Recursion available (for responses)
 	}
-	
+
 	if isQuery {
 		dns.Questions = []layers.DNSQuestion{
 			{
@@ -312,28 +312,28 @@ func generateMockDNSPacket(domain string, isQuery bool) []byte {
 			},
 		}
 	}
-	
+
 	// Calculate checksums and lengths
 	udp.SetNetworkLayerForChecksum(&ipv4)
-	
+
 	// Serialize all layers into buffer
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		ComputeChecksums: true,
 		FixLengths:       true,
 	}
-	
+
 	err := gopacket.SerializeLayers(buffer, opts,
 		&eth,
 		&ipv4,
 		&udp,
 		&dns,
 	)
-	
+
 	if err != nil {
 		panic(err) // In a test, we can just panic
 	}
-	
+
 	return buffer.Bytes()
 }
 
@@ -345,7 +345,7 @@ func generateMockUDPPacket(srcPort, dstPort uint16) []byte {
 		DstMAC:       net.HardwareAddr{0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb},
 		EthernetType: layers.EthernetTypeIPv4,
 	}
-	
+
 	ipv4 := layers.IPv4{
 		Version:  4,
 		TTL:      64,
@@ -353,32 +353,32 @@ func generateMockUDPPacket(srcPort, dstPort uint16) []byte {
 		SrcIP:    net.ParseIP("192.168.1.20"),
 		DstIP:    net.ParseIP("192.168.1.30"),
 	}
-	
+
 	udp := layers.UDP{
 		SrcPort: layers.UDPPort(srcPort),
 		DstPort: layers.UDPPort(dstPort),
 	}
-	
+
 	// Calculate checksums and lengths
 	udp.SetNetworkLayerForChecksum(&ipv4)
-	
+
 	// Serialize all layers into buffer
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		ComputeChecksums: true,
 		FixLengths:       true,
 	}
-	
+
 	err := gopacket.SerializeLayers(buffer, opts,
 		&eth,
 		&ipv4,
 		&udp,
 	)
-	
+
 	if err != nil {
 		panic(err)
 	}
-	
+
 	return buffer.Bytes()
 }
 
@@ -418,13 +418,13 @@ func processPacketForTest(packet gopacket.Packet) Traffic {
 		t.Protocol = "UDP"
 		t.SrcPort = uint16(udp.SrcPort)
 		t.DstPort = uint16(udp.DstPort)
-		
+
 		// Check for DNS
 		if t.DstPort == 53 || t.SrcPort == 53 {
 			if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
 				dns, _ := dnsLayer.(*layers.DNS)
 				t.IsDNS = true
-				
+
 				// Extract query information if available
 				if len(dns.Questions) > 0 {
 					t.DNSQuery = string(dns.Questions[0].Name)
@@ -452,7 +452,7 @@ func processDNSTrafficForTest(topology NetworkTopology, t Traffic) {
 		dstNode.IsDNSServer = true
 		dstNode.DNSQueryCount++
 	}
-	
+
 	// If it's a DNS response (server to client)
 	if t.SrcPort == 53 {
 		srcNode := topology.Nodes[t.SrcIP]

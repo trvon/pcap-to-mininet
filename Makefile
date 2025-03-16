@@ -1,4 +1,4 @@
-.PHONY: all build clean test lint run help
+.PHONY: all build clean test lint run help viz
 
 # Binary name
 BINARY_NAME=pcap-to-p4app
@@ -29,6 +29,20 @@ run-pcap: build
 run-dir: build
 	@echo "Running with directory of PCAP files..."
 	$(BUILD_DIR)/$(BINARY_NAME) --dir $(DIR) --verbose
+
+# Generate visualization from a PCAP file
+viz-pcap: build
+	@echo "Generating visualization from PCAP file..."
+	$(BUILD_DIR)/$(BINARY_NAME) --pcap $(PCAP) --visualize --verbose
+	@if command -v dot > /dev/null; then \
+		echo "Generating PNG image with Graphviz..."; \
+		BASENAME=$$(basename $(PCAP) .pcap); \
+		dot -Tpng $${BASENAME}.dot -o $${BASENAME}.png; \
+		echo "Visualization generated to $${BASENAME}.png"; \
+	else \
+		echo "Graphviz 'dot' command not found. Install Graphviz to generate PNG images."; \
+		echo "You can manually convert the DOT file with: dot -Tpng output.dot -o output.png"; \
+	fi
 
 # Clean build artifacts
 clean:
@@ -67,6 +81,7 @@ help:
 	@echo "  make run                Run the application with default settings"
 	@echo "  make run-pcap PCAP=file.pcap  Run with a specific PCAP file"
 	@echo "  make run-dir DIR=path/to/dir  Run with a directory of PCAP files"
+	@echo "  make viz-pcap PCAP=file.pcap  Generate visualization from a PCAP file"
 	@echo "  make test               Run tests"
 	@echo "  make lint               Run linters"
 	@echo "  make fmt                Format code"
