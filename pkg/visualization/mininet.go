@@ -204,34 +204,35 @@ def createTopology():
     hosts = {}
     {{range $ip, $node := .Nodes}}
     {{if $node.IsLocal}}
-    # Add host {{$ip}} ({{$node.Role}})
-    {{if or (eq $node.Role "gateway") (eq $node.Role "router")}}
+    # Processing node {{$ip}} ({{$node.Role}})
+    {{if eq $node.Role "switch"}}
+    # Skipping host creation for switch node {{$ip}}
+    # L2 connectivity handled by OVSSwitch instances
+    {{else if or (eq $node.Role "gateway") (eq $node.Role "router")}}
+    # Add router/gateway (only creates one instance currently)
     if router is None:
         router = net.addHost('r{{formatIP $ip}}', ip='{{$ip}}')
         # Connect router to core switch
-        net.addLink(router, core_switch)
+            net.addLink(router, core_switch)
     {{else if eq $node.Role "dns-server"}}
-    # Add DNS server with custom configuration
+    # Add DNS server host
     hosts['{{$ip}}'] = net.addHost('dns{{formatIP $ip}}', ip='{{$ip}}', mac='{{formatMAC $node.MAC}}')
     {{if $node.Subnet}}
-    # Connect to subnet switch
     net.addLink(hosts['{{$ip}}'], switches['{{$node.Subnet}}'])
     {{else}}
-    # No subnet, connect to core
     net.addLink(hosts['{{$ip}}'], core_switch)
     {{end}}
     {{else}}
+    # Add other hosts (client, server, etc.)
     hosts['{{$ip}}'] = net.addHost('h{{formatIP $ip}}', ip='{{$ip}}', mac='{{formatMAC $node.MAC}}')
     {{if $node.Subnet}}
-    # Connect to subnet switch
     net.addLink(hosts['{{$ip}}'], switches['{{$node.Subnet}}'])
     {{else}}
-    # No subnet, connect to core
     net.addLink(hosts['{{$ip}}'], core_switch)
     {{end}}
-    {{end}}
-    {{end}}
-    {{end}}
+    {{end}} {{/* End of role checks */}}
+    {{end}} {{/* End of IsLocal check */}}
+    {{end}} {{/* End of node range */}}
     
     # Add Internet host to simulate external traffic if we have a gateway
     {{if hasGateway .Nodes}}

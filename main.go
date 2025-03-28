@@ -36,6 +36,7 @@ func main() {
 	}
 
 	var allTrafficData []analyzer.Traffic
+	allUniqueMACs := make(map[string]struct{}) // Aggregate unique MACs from all files
 
 	if *pcapFile != "" {
 		// Process single PCAP file
@@ -43,15 +44,20 @@ func main() {
 			log.Printf("Analyzing PCAP file: %s", *pcapFile)
 		}
 
-		trafficData, err := pcapprocessor.ParsePCAP(*pcapFile)
+		trafficData, uniqueMACs, err := pcapprocessor.ParsePCAP(*pcapFile)
 		if err != nil {
 			log.Fatal(err)
+		}
+
+		// Merge unique MACs
+		for mac := range uniqueMACs {
+			allUniqueMACs[mac] = struct{}{}
 		}
 
 		allTrafficData = append(allTrafficData, trafficData...)
 
 		if *verbose {
-			log.Printf("Parsed %d packets from %s", len(trafficData), *pcapFile)
+			log.Printf("Parsed %d packets from %s (found %d unique MACs in this file)", len(trafficData), *pcapFile, len(uniqueMACs))
 		}
 	} else if *pcapDir != "" {
 		// Process directory of PCAP files
@@ -82,17 +88,22 @@ func main() {
 				log.Printf("Processing PCAP file: %s", fullPath)
 			}
 
-			trafficData, err := pcapprocessor.ParsePCAP(fullPath)
+			trafficData, uniqueMACs, err := pcapprocessor.ParsePCAP(fullPath)
 			if err != nil {
 				log.Printf("Warning: Failed to parse %s: %v", fullPath, err)
 				continue
+			}
+
+			// Merge unique MACs
+			for mac := range uniqueMACs {
+				allUniqueMACs[mac] = struct{}{}
 			}
 
 			allTrafficData = append(allTrafficData, trafficData...)
 			pcapCount++
 
 			if *verbose {
-				log.Printf("Parsed %d packets from %s", len(trafficData), fileName)
+				log.Printf("Parsed %d packets from %s (found %d unique MACs in this file)", len(trafficData), fileName, len(uniqueMACs))
 			}
 		}
 
@@ -116,10 +127,15 @@ func main() {
 	}
 
 	networkTopology := topology.InferTopology(allTrafficData)
+	// Initialize UniqueMACs field before fuzzy logic
+	networkTopology.UniqueMACs = allUniqueMACs
 	refinedTopology := analyzer.ApplyFuzzyLogic(networkTopology)
+	// Ensure UniqueMACs persists after fuzzy logic (if ApplyFuzzyLogic creates a new struct)
+	refinedTopology.UniqueMACs = allUniqueMACs
+
 
 	if *verbose {
-		log.Printf("Network topology inferred with %d nodes", len(refinedTopology.Nodes))
+		log.Printf("Network topology inferred with %d nodes and %d unique MAC addresses", len(refinedTopology.Nodes), len(refinedTopology.UniqueMACs))
 		printTopologySummary(refinedTopology)
 	}
 
@@ -202,6 +218,9 @@ func printTopologySummary(topology analyzer.NetworkTopology) {
 	log.Printf("  Gateway MACs: %d", gatewayMACs)
 	log.Printf("  Router/Multi-homed MACs: %d", routerMACs)
 	log.Printf("  Host MACs: %d", hostMACs)
+
+	// Report total unique MACs
+	log.Printf("Total unique MAC addresses found across all files: %d", len(topology.UniqueMACs))
 
 	// Print detailed information about gateways
 	log.Printf("Gateway details:")

@@ -46,9 +46,10 @@ type NetworkNode struct {
 
 // NetworkTopology represents the inferred network topology
 type NetworkTopology struct {
-	Nodes    map[string]*NetworkNode
-	Edges    map[string]map[string]float64 // Source -> Destination -> Connection strength
-	MACRoles map[string]string             // MAC address -> Role mapping from MAC-IP analysis
+	Nodes       map[string]*NetworkNode
+	Edges       map[string]map[string]float64 // Source -> Destination -> Connection strength
+	MACRoles    map[string]string             // MAC address -> Role mapping from MAC-IP analysis
+	UniqueMACs  map[string]struct{}           // Set of all unique MAC addresses encountered
 }
 
 // Process a packet and return Traffic information

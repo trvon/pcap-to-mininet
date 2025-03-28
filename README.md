@@ -17,6 +17,9 @@ This tool is particularly useful for network research, cybersecurity training, a
 
 ## Installation
 
+### Dependencies
+- libpcap-dev, graphviz (ubuntu)
+
 ```bash
 # Clone the repository
 git clone https://github.com/trvon/pcap-to-p4app.git
