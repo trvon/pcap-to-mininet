@@ -290,9 +290,88 @@ if __name__ == '__main__':
     net = createTopology()
     net.start()
     
+    # --- Dump Topology to JSON ---
+    info('*** Dumping topology to JSON\n')
+    topo_data = {'nodes': [], 'links': []}
+    # Add hosts
+    for host in net.hosts:
+        # Ensure host has an IP before adding
+        host_ip = host.IP()
+        if host_ip:
+             node_info = {
+                 'id': host.name,
+                 'isHost': True,
+                 'mac': host.MAC(),
+                 'ip': host_ip + '/24' # Assuming /24, might need adjustment
+             }
+             topo_data['nodes'].append(node_info)
+        else:
+             info(f'*** Skipping host {host.name} with no IP for JSON dump\n')
+
+    # Add switches
+    for switch in net.switches:
+        node_info = {
+            'id': switch.name,
+            'isP4Switch': True # Assume P4 switch for compatibility
+            # Add other switch info if available/needed
+        }
+        topo_data['nodes'].append(node_info)
+
+    # Add links
+    link_id_counter = 0
+    for link in net.links:
+        try:
+            node1 = link.intf1.node.name
+            node2 = link.intf2.node.name
+            # Use intf.name which should be reliable
+            intfName1 = link.intf1.name
+            intfName2 = link.intf2.name
+            # Get ports - might fail if not set, default to 0
+            port1 = link.intf1.node.ports.get(link.intf1, 0)
+            port2 = link.intf2.node.ports.get(link.intf2, 0)
+            addr1 = link.intf1.MAC()
+            addr2 = link.intf2.MAC()
+            ip1 = link.intf1.IP()
+            ip2 = link.intf2.IP()
+
+            link_info = {
+                'id': f'link_{link_id_counter}',
+                'node1': node1,
+                'node2': node2,
+                'port1': port1,
+                'port2': port2,
+                'addr1': addr1,
+                'addr2': addr2,
+                'intfName1': intfName1,
+                'intfName2': intfName2,
+                'ip1': f"{ip1}/24" if ip1 else None, # Assuming /24
+                'ip2': f"{ip2}/24" if ip2 else None, # Assuming /24
+            }
+            topo_data['links'].append(link_info)
+            link_id_counter += 1
+        except Exception as link_err:
+             info(f'*** Error processing link {link}: {link_err}\n')
+
+
+    # Write to topology.json in the project root directory
+    import json
+    import os
+    # Determine project root relative to the script location (assuming script is in env/)
+    script_path = os.path.abspath(__file__)
+    env_dir = os.path.dirname(script_path)
+    project_root = os.path.dirname(env_dir)
+    json_path = os.path.join(project_root, 'topology.json') # Output to root
+    try:
+        with open(json_path, 'w') as f:
+            json.dump(topo_data, f, indent=4)
+        info(f'*** Topology dumped to {json_path}\n')
+    except Exception as e:
+        info(f'*** Error dumping topology to JSON: {e}\n')
+    # --- End Dump Topology ---
+
     info('*** Running CLI\n')
     CLI(net)
-    
+
     info('*** Stopping network\n')
     net.stop()`
 
